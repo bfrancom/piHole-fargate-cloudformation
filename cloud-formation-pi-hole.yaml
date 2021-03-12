@@ -1,0 +1,80 @@
+Description: >
+  This template deploys piHole to an AWS Fargate Cluster on user-defined VPC and Subnets. Container definition is pulled from the public Docker image for piHole (https://hub.docker.com/r/pihole/pihole/). An ECS Service ensures piHole continues to run. Logging is captured within CloudWatch. You'll also need to verify a task execution role for ECS is setup (see https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_execution_IAM_role.html)
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "PiHole Network Configuration"
+        Parameters: 
+          - VpcId
+          - Subnets
+          - SecurityGroup
+
+Parameters:
+  VpcId:
+    Description: The VPC to which this cluster should be deployed
+    Type: AWS::EC2::VPC::Id
+
+  Subnets:
+    Description: Choose at least two subnets in this VPC
+    Type: List<AWS::EC2::Subnet::Id>
+
+  SecurityGroup:
+    Description: The Security Group to Use
+    Type: List<AWS::EC2::SecurityGroup::Id>
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/pihole-fargate
+  
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: pihole-fargate-cluster
+
+  TaskDefinition: 
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: pihole-fargate
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/ecsTaskExecutionRole
+      Memory: 512
+      Cpu: 256
+      ContainerDefinitions:
+        -
+          Name: pihole-container
+          Image: pihole/pihole:latest
+          Memory: 512
+          Cpu: 256
+          PortMappings:
+            - ContainerPort: 53
+              protocol: udp 
+            - ContainerPort: 53
+            - ContainerPort: 443
+            - ContainerPort: 80
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+                awslogs-group: "/ecs/pihole-fargate"
+                awslogs-region: !Ref AWS::Region
+                awslogs-stream-prefix: "dashboard"
+
+  ServiceDefinition:
+    Type: AWS::ECS::Service
+    Properties:
+      LaunchType: FARGATE
+      TaskDefinition: !Ref TaskDefinition
+      Cluster: !Ref ECSCluster
+      ServiceName: pihole-service
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: !Ref Subnets
+          SecurityGroups: !Ref SecurityGroup
